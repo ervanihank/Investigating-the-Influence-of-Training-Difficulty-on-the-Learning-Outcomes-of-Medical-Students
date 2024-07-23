@@ -1,0 +1,638 @@
+---
+title: "optimal_difficulty_lmer_analysis"
+author: "Erva"
+date: "2024-04-26"
+output: html_document
+---
+
+Packages
+
+```{r echo=FALSE}
+library(data.table)
+library(ggplot2)
+library(dplyr)
+library(tools)
+library(progress)
+library(viridis)
+library(ggforce)
+library(see)
+library(stringr)
+library(reshape2)
+library(gridExtra)
+library(lme4)
+library(lmerTest)
+library(sjPlot)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = 'C:/Users/Ghislane/Desktop/optimal_difficulty_1/code/data/sides/elo_bins')
+```
+
+# read file
+```{r}
+file= "average_quest_dif_100.csv"
+# read the file
+average_quest_dif <- read.csv(file)
+
+  name_file <- substr(file, 18, nchar(file))
+
+```
+
+# rename variables to make them transparent
+```{r}
+# rename the column
+average_quest_dif <- average_quest_dif %>%
+  rename(mean_relative_difficulty = mean_skill_difficulty_difference)
+
+# rename the column
+average_quest_dif <- average_quest_dif %>%
+  rename(student_ability = ability_2020_2021)
+
+# rename the column
+average_quest_dif <- average_quest_dif %>%
+  rename(relative_difficulty_slope = slope)
+```
+
+
+# mean- center interaction variables  (only the n_question_in_spec_training)
+```{r}
+# Calculate the mean of n_question_in_spec_training
+mean_n_question <- mean(average_quest_dif$n_question_in_spec_training, na.rm = TRUE)
+
+# Center the variable n_question_in_spec_training by subtracting its mean from each observation
+average_quest_dif$n_question_in_spec_training_c <- average_quest_dif$n_question_in_spec_training - mean_n_question
+
+```
+
+# correaltions
+## correlation matrix
+```{r}
+
+# Selecting the columns
+for_table <- average_quest_dif[c('mean_relative_difficulty', 'student_ability', 'prop_correct_ecn', 'mean_student_average_ability', 'n_question_in_spec_training', 'mean_difficulty','mean_elo_ExpectedScore','n_question_in_spec_training_c')]
+
+
+# Calculating means and standard deviations
+means <- colMeans(for_table, na.rm = TRUE)
+sds <- apply(for_table, 2, sd, na.rm = TRUE)
+
+# Correlation matrix
+correlations <- cor(for_table, use = 'pairwise.complete.obs')
+
+# Create a formatted table with means, SDs, and correlations
+formatted_table <- data.frame(M = means, SD = sds, correlations)
+
+# Function to determine significance asterisks
+significance_asterisks <- function(p_value) {
+  if (p_value < 0.001) {
+    return('***')
+  } else if (p_value < 0.01) {
+    return('**')
+  } else if (p_value < 0.05) {
+    return('*')
+  } else {
+    return('')
+  }
+}
+
+# Populate the correlations with significance testing
+for (col in colnames(for_table)) {
+  for (row in colnames(for_table)) {
+    if (col == row) {
+      # Diagonals are not displayed in the table
+      formatted_table[row, col] <- '—'
+    } else {
+      # Calculate the p-value
+      p_value <- Hmisc::rcorr(as.matrix(for_table[, c(row, col)]))$P[1, 2]
+      # Format with two decimal places and add significance asterisks
+      corr <- correlations[row, col]
+      formatted_table[row, col] <- paste0(format(corr, digits = 2), significance_asterisks(p_value))
+    }
+  }
+}
+
+# You can save this table to a CSV or Excel file, or print it out
+write.csv(formatted_table, file = 'formatted_correlation_table_with_significance.csv', row.names = TRUE)
+
+formatted_table
+
+
+# Calculating the correlation matrix
+correlation_matrix <- cor(for_table, use = "pairwise.complete.obs")
+
+# Print the correlation matrix
+print(correlation_matrix)
+
+
+# visiulazi
+# Compute correlation matrix
+correlation_matrix <- cor(for_table)
+
+# Visualize the correlation matrix
+library(corrplot)
+corrplot(correlation_matrix, method = "number")
+
+
+```
+
+
+## within student correlation
+```{r}
+library(dplyr)
+
+# Calculate the correlation within each student across their specialties
+student_correlations <- average_quest_dif %>%
+  group_by(student) %>%
+  summarize(correlation = cor(mean_relative_difficulty, student_ability, use = "complete.obs"),
+            .groups = 'drop')
+
+# Viewing the summary of these correlations
+summary(student_correlations$correlation)
+
+# Plotting the distribution of within-student correlations
+p1 <- ggplot(student_correlations, aes(x = correlation)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.05, fill = "blue", alpha = 0.3, color = "black") +
+  geom_density(color = "blue", fill = "blue", alpha = 0.5) +
+  ggtitle("Density and Histogram of Within-Student Correlations") +
+  xlab("Correlation between Mean Relative Difficulty and Ability") +
+  ylab("Density") +
+  theme_minimal()
+
+print(p1)
+
+```
+
+
+## within specialty correlation
+
+```{r}
+library(dplyr)
+
+# Calculate the correlation within each student across their specialties
+specialty_correlations <- average_quest_dif %>%
+  group_by(specialty) %>%
+  summarize(correlation = cor(mean_relative_difficulty, student_ability, use = "complete.obs"),
+            .groups = 'drop')
+
+print(specialty_correlations)
+# Viewing the summary of these correlations
+summary(specialty_correlations$correlation)
+
+# Plotting the distribution of within-specialty correlations using a bar plot
+p1 <- ggplot(specialty_correlations, aes(x = specialty, y = correlation)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = 0.3, color = "black") +
+  ggtitle("Bar Plot of Within-specialty Correlations") +
+  xlab("Specialty") +
+  ylab("Correlation between Mean Relative Difficulty and Ability") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
+
+print(p1)
+
+
+
+```
+
+
+### Full Model & Colinearity check : specialty as radnom intercept and slope
+```{r}
+model_formula <- prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relative_difficulty + 
+  n_question_in_spec_training_c+
+  student_ability+
+  student_ability:I(mean_relative_difficulty^2)+
+  student_ability:mean_relative_difficulty+
+  student_ability:n_question_in_spec_training_c+
+  (1 | student)+
+  (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty)
+
+# Fit the linear mixed-effects model
+model_fit <- lmer(model_formula, data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"))
+
+# Display the model summary with the name of the file
+cat(paste("Model summary for", name_file, ":\n"))
+print(summary(model_fit))
+# Create a table of fixed effects
+tabel_model <- tab_model(model_fit, show.se = TRUE, title = "Table: Regression Analysis Results")
+
+# Print the table
+tabel_model
+
+## CHECK COLINEARITY
+library(performance)
+check_collinearity(model_fit)
+
+
+## AIC and BIC - Akaike Information Criterion (AIC) and the Bayesian Information Criterion (BIC)
+aic_value <- AIC(model_fit)
+bic_value <- BIC(model_fit)
+cat("AIC =", aic_value, "\n")
+cat("BIC =", bic_value, "\n")
+
+```
+
+
+### p value for random effect
+```{r}
+library(lme4)
+full_model <- lmer(prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relative_difficulty + 
+  n_question_in_spec_training_c +
+  student_ability +
+  student_ability:I(mean_relative_difficulty^2) +
+  student_ability:mean_relative_difficulty +
+  student_ability:n_question_in_spec_training_c +
+  (1 | student) +
+  (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty), 
+  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"))
+
+
+reduced_model <- lmer(prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relative_difficulty + 
+  n_question_in_spec_training_c +
+  student_ability +
+  student_ability:I(mean_relative_difficulty^2) +
+  student_ability:mean_relative_difficulty +
+  student_ability:n_question_in_spec_training_c +
+  (1 | student) +
+  (1 + I(mean_relative_difficulty^2) | specialty), 
+  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"))
+
+library(lmtest)
+anova_result <- anova(reduced_model, full_model)
+print(anova_result)
+
+```
+
+
+## correlation fixed effects
+```{r}
+# Convert fixed effects coefficients to a matrix-like object
+fixed_effects_matrix <- matrix(fixed_effects, nrow = 1)
+
+# Calculate correlation matrix for fixed effects
+cor_fixed_effects <- cor(t(fixed_effects_matrix))
+
+# Display the correlation matrix
+cat("Correlation matrix of fixed effects:\n")
+print(cor_fixed_effects)
+
+```
+
+
+##have table with exact numbers
+
+```{r}
+# Assume we already have the summary data frame
+fixed_effects <- summary(model_fit)$coefficients
+
+# Check if p-values are below .Machine$double.eps and adjust display
+fixed_effects[,"Pr(>|t|)"] <- ifelse(fixed_effects[,"Pr(>|t|)"] < .Machine$double.eps,
+                                     "< 1e-16",  # You can choose the threshold
+                                     format.pval(fixed_effects[,"Pr(>|t|)"], digits = 10))
+
+# Print the modified fixed effects table
+print(fixed_effects)
+
+```
+
+
+# Model Fit
+```{r}
+## PLOT
+  
+  # Create a sequence of mean_relative_difficulty values for plotting
+  x_values <- seq(
+    min(average_quest_dif$mean_relative_difficulty ),
+    max(average_quest_dif$mean_relative_difficulty ),
+    length.out = 20
+  )
+
+  x_values_slope <- seq(
+    min(average_quest_dif$relative_difficulty_slope ),
+    max(average_quest_dif$relative_difficulty_slope ),
+    length.out = 20
+  )
+  
+   x_values_ability <- seq(
+    min(average_quest_dif$student_ability ),
+    max(average_quest_dif$student_ability ),
+    length.out = 20
+  )
+   
+   x_values_nb_question<-seq(
+    min(average_quest_dif$n_question_in_spec_training_c ),
+    max(average_quest_dif$n_question_in_spec_training_c ),
+    length.out = 10
+  )
+   
+  # List of unique specialties
+  specialties <- unique(average_quest_dif$specialty)
+  
+  
+  # Create a data frame to store the values for prediction
+prediction_data <- expand.grid(
+  mean_relative_difficulty = x_values,
+  specialty = unique(average_quest_dif$specialty),
+  student_ability = x_values_ability,
+  n_question_in_spec_training_c=mean(average_quest_dif$n_question_in_spec_training_c ),
+  relative_difficulty_slope=mean(average_quest_dif$relative_difficulty_slope )
+)
+  
+  # Predict values using the model, including random effects for 'specialty'
+  predicted_values <- predict(model_fit, newdata = prediction_data, re.form = ~   (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty))
+  
+  prediction_data$learning_slope = predicted_values
+  
+  # Convert student to factor
+  average_quest_dif <- average_quest_dif %>%
+    mutate(student = factor(student))
+  
+  library(ggplot2)
+  # 
+  # # find the mean of mean relative diffciulty
+  # mean_mean_relative_diffciulty= prediction_data %>%
+  # group_by(specialty) %>%
+  #    summarise(mean_mean = mean(mean_relative_difficulty))
+
+# Find the mean_relative_difficulty values that maximize the predicted prop_correct_ecn for each specialty and student_ability
+max_x_values <- prediction_data %>%
+  group_by(specialty, student_ability) %>%
+  summarise(max_mean_difficulty = mean_relative_difficulty[which.max(learning_slope)])
+
+  # Calculate the number of points in each facet for each specialty
+facet_counts <- average_quest_dif %>%
+  group_by(specialty) %>%
+  summarise(n = n())
+  
+p <- ggplot(prediction_data, aes(x = mean_relative_difficulty, y = learning_slope)) +
+  geom_line(aes(group = interaction(specialty, student_ability), color = student_ability),
+            size = 2, alpha = 0.7) +
+  labs(
+    x = expression(atop("Mean Relative Difficulty", atop("Mean(Question Difficulty - Online Student Ability)", ""))),
+    y = expression(atop("Final Exam Score", atop("(Proportion Correct)", "")))
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 20),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 16, margin = margin(b = 10)),
+    plot.caption = element_text(size = 14, margin = margin(t = 10)),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    strip.text = element_text(size = 11),
+    panel.grid.major = element_line(color = "lightgray", linetype = "dashed")
+  ) +
+  facet_wrap(~gsub("_", " ", specialty), scales = "free", ncol = 4) +  # 4 columns
+  scale_color_viridis_c(option = "C", direction = -1) +
+  geom_vline(
+    data = max_x_values,
+    aes(xintercept = max_mean_difficulty, color = student_ability),
+    size = 0.7,
+    linetype = "dashed"
+  ) +
+  geom_text(
+    data = facet_counts,
+    aes(label = paste("n =", n), x = Inf, y = Inf),
+    hjust = 1,
+    vjust = 1,
+    size = 5,
+    show.legend = FALSE
+  ) +
+  labs(color = "Final Student Ability", linetype = "Optimal")
+
+# Increase the width for 4 subplots per row
+ggsave(
+   "C:/Users/Ghislaine/Desktop/optimal_difficulty_1/code/data/sides/elo_bins/modelfit.png",
+  plot = p,
+  width = 19, height = 10, units = "in", dpi = 300
+)
+
+print(p)
+```
+
+
+## model fit for only students with mean student ability
+
+```{r}
+## PLOT
+  
+  # Create a sequence of mean_relative_difficulty values for plotting
+  x_values <- seq(
+    min(average_quest_dif$mean_relative_difficulty ),
+    max(average_quest_dif$mean_relative_difficulty ),
+    length.out = 20
+  )
+
+  x_values_slope <- seq(
+    min(average_quest_dif$relative_difficulty_slope ),
+    max(average_quest_dif$relative_difficulty_slope ),
+    length.out = 20
+  )
+  
+   x_values_ability <- seq(
+    min(average_quest_dif$student_ability ),
+    max(average_quest_dif$student_ability ),
+    length.out = 20
+  )
+   
+   x_values_nb_question<-seq(
+    min(average_quest_dif$n_question_in_spec_training_c ),
+    max(average_quest_dif$n_question_in_spec_training_c ),
+    length.out = 10
+  )
+   
+  # List of unique specialties
+  specialties <- unique(average_quest_dif$specialty)
+  
+  
+  # Create a data frame to store the values for prediction
+prediction_data <- expand.grid(
+  mean_relative_difficulty = x_values,
+  specialty = unique(average_quest_dif$specialty),
+  student_ability = mean(average_quest_dif$student_ability ),
+  n_question_in_spec_training_c=mean(average_quest_dif$n_question_in_spec_training_c ),
+  relative_difficulty_slope=mean(average_quest_dif$relative_difficulty_slope )
+)
+  
+  # Predict values using the model, including random effects for 'specialty'
+  predicted_values <- predict(model_fit, newdata = prediction_data, re.form = ~   (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty))
+  
+  prediction_data$learning_slope = predicted_values
+  
+  # Convert student to factor
+  average_quest_dif <- average_quest_dif %>%
+    mutate(student = factor(student))
+  
+  library(ggplot2)
+  # 
+  # # find the mean of mean relative diffciulty
+  # mean_mean_relative_diffciulty= prediction_data %>%
+  # group_by(specialty) %>%
+  #    summarise(mean_mean = mean(mean_relative_difficulty))
+
+# Find the mean_relative_difficulty values that maximize the predicted prop_correct_ecn for each specialty and student_ability
+max_x_values <- prediction_data %>%
+  group_by(specialty, student_ability) %>%
+  summarise(max_mean_difficulty = mean_relative_difficulty[which.max(learning_slope)])
+
+  # Calculate the number of points in each facet for each specialty
+facet_counts <- average_quest_dif %>%
+  group_by(specialty) %>%
+  summarise(n = n())
+  
+p <- ggplot(prediction_data, aes(x = mean_relative_difficulty, y = learning_slope)) +
+  geom_line(aes(group = interaction(specialty, student_ability), color = student_ability),
+            size = 2, alpha = 0.7) +
+  labs(
+    x = expression(atop("Mean Relative Difficulty", atop("Mean(Question Difficulty - Online Student Ability)", ""))),
+    y = expression(atop("Mock Final Exam Score", atop("(Proportion Correct)", "")))
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 20),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 16, margin = margin(b = 10)),
+    plot.caption = element_text(size = 14, margin = margin(t = 10)),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    strip.text = element_text(size = 11),
+    panel.grid.major = element_line(color = "lightgray", linetype = "dashed")
+  ) +
+  facet_wrap(~gsub("_", " ", specialty), scales = "free", ncol = 4) +  # 4 columns
+  scale_color_viridis_c(option = "C", direction = -1) +
+  # geom_vline(
+  #   data = max_x_values,
+  #   aes(xintercept = max_mean_difficulty, color = student_ability),
+  #   size = 1,
+  #   linetype = "dashed"
+  # ) +
+  labs(color = "Final Student Ability", linetype = "Optimal")
+  #+geom_text(data = max_x_values, aes(x = max_mean_difficulty-1.5, y = 0.3, label = round(max_mean_difficulty, 2)), vjust = -1, size = 7.5, color = "darkgreen", hjust = -0.1)
+
+
+# Increase the width for 4 subplots per row
+ggsave(
+   "C:/Users/Ghislaine/Desktop/optimal_difficulty_1/code/data/sides/elo_bins/modelfit.png",
+  plot = p,
+  width = 19, height = 10, units = "in", dpi = 300
+)
+
+print(p)
+```
+
+# calculate the mean optimal relative difficulty across all specialties and students
+
+```{r}
+# Extract random effects
+random_effects <- ranef(model_fit)
+
+# Get the random effects for each specialty
+specialty_effects <- random_effects$specialty
+
+# Assuming a plausible range for mean_relative_difficulty
+difficulty_range <- seq(-3, 3, length.out = 100)
+
+
+library(dplyr)
+library(purrr)
+
+# Assume mean values for student_ability and n_question_in_spec_training_c
+mean_student_ability <- mean(average_quest_dif$student_ability)
+mean_n_questions <- mean(average_quest_dif$n_question_in_spec_training_c)
+
+# Function to calculate predictions
+calculate_predictions <- function(specialty) {
+  # Extract specialty-specific random effects
+  intercept_spec <- specialty_effects[[specialty]]$`(Intercept)`
+  slope_difficulty <- specialty_effects[[specialty]]$mean_relative_difficulty
+  slope_difficulty_sq <- specialty_effects[[specialty]]$`I(mean_relative_difficulty^2)`
+  
+  # Calculate predictions across the difficulty range
+  sapply(difficulty_range, function(diff) {
+    pred <- (fixed_effects$`(Intercept)`
+             + fixed_effects$mean_relative_difficulty * diff
+             + fixed_effects$`I(mean_relative_difficulty^2)` * diff^2
+             + fixed_effects$student_ability * mean_student_ability
+             + fixed_effects$`student_ability:mean_relative_difficulty` * mean_student_ability * diff
+             + fixed_effects$`student_ability:I(mean_relative_difficulty^2)` * mean_student_ability * diff^2
+             + fixed_effects$n_question_in_spec_training_c * mean_n_questions
+             + fixed_effects$`student_ability:n_question_in_spec_training_c` * mean_student_ability * mean_n_questions
+             + intercept_spec
+             + slope_difficulty * diff
+             + slope_difficulty_sq * diff^2)
+    return(pred)
+  })
+}
+
+# Extract fixed effects
+fixed_effects <- fixef(model_fit)
+
+fixed_effects <- as.list(fixef(model_fit))
+
+# Calculate predictions for each specialty and find the maximum
+optimal_difficulties <- lapply(rownames(specialty_effects), function(specialty) {
+  predictions <- calculate_predictions(specialty)
+  max_index <- which.max(predictions)
+  max_difficulty <- difficulty_range[max_index]
+  list(specialty = specialty, max_difficulty = max_difficulty, max_prediction = max(predictions))
+})
+
+optimal_difficulties <- bind_rows(optimal_difficulties)
+
+print(optimal_difficulties)
+
+```
+
+```{r}
+library(lme4)
+library(dplyr)
+
+# Assuming model_fit is already fitted
+
+# Calculate mean values for student_ability and n_question_in_spec_training_c
+mean_student_ability <- mean(average_quest_dif$student_ability, na.rm = TRUE)
+mean_n_questions <- mean(average_quest_dif$n_question_in_spec_training_c, na.rm = TRUE)
+
+# Define a sequence of mean_relative_difficulty values to evaluate
+mrd_seq <- seq(from = min(average_quest_dif$mean_relative_difficulty, na.rm = TRUE), 
+               to = max(average_quest_dif$mean_relative_difficulty, na.rm = TRUE), length.out = 100)
+
+# Function to calculate predicted prop_correct_ecn for a given specialty
+predict_specialty <- function(specialty) {
+  # Create a data frame for predictions
+  pred_data <- expand.grid(
+    mean_relative_difficulty = mrd_seq,
+    student_ability = mean_student_ability,
+    n_question_in_spec_training_c = mean_n_questions,
+    specialty = specialty
+  )
+  
+  # Predict prop_correct_ecn using the model
+  pred_data$prop_correct_ecn <- predict(model_fit, newdata = pred_data,  re.form = ~ (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty))
+  
+  # Find the mean_relative_difficulty that maximizes prop_correct_ecn
+  max_difficulty <- pred_data$mean_relative_difficulty[which.max(pred_data$prop_correct_ecn)]
+  return(max_difficulty)
+}
+
+# Apply function to each specialty
+specialties <- unique(average_quest_dif$specialty)
+optimal_difficulties <- sapply(specialties, predict_specialty)
+
+# View results
+names(optimal_difficulties) <- specialties
+optimal_difficulties
+
+# Calculate mean and standard deviation of optimal mean_relative_difficulties
+mean_difficulty <- mean(optimal_difficulties)
+sd_difficulty <- sd(optimal_difficulties)
+
+# Print results
+cat("Mean of optimal mean_relative_difficulty: ", mean_difficulty, "\n")
+cat("Standard deviation of optimal mean_relative_difficulty: ", sd_difficulty, "\n")
+
+
+
+```
+
