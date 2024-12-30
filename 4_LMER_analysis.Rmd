@@ -3,30 +3,41 @@ title: "optimal_difficulty_lmer_analysis"
 author: "Erva"
 date: "2024-04-26"
 output: html_document
+RStudio version: RStudio 2023.12.0+369 "Ocean Storm" Release (33206f75bd14d07d84753f965eaa24756eda97b7, 2023-12-17) for windows
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) RStudio/2023.12.0+369 Chrome/116.0.5845.190 Electron/26.2.4 Safari/537.36
+R version: 4.2.2 (2022-10-31 ucrt)
 ---
 
 Packages
 
 ```{r echo=FALSE}
-library(data.table)
-library(ggplot2)
-library(dplyr)
-library(tools)
-library(progress)
-library(viridis)
-library(ggforce)
-library(see)
-library(stringr)
-library(reshape2)
-library(gridExtra)
-library(lme4)
-library(lmerTest)
-library(sjPlot)
-
+library(data.table) # version: 1.16.4
+library(dplyr) # version 1.1.4
+library(ggplot2) # verison 3.4.2
+library(dplyr) # version 1.1.4
+library(tools) # version 4.2.2
+library(progress) # version 1.2.3
+library(viridis) # version 0.6.2
+library(ggforce) # 0.4.1
+library(see) # version 0.7.5
+library(stringr) # version 1.5.0
+library(reshape2) # version 1.4.4
+library(gridExtra) # version 2.3
+library(lme4) # version: 1.1.31
+library(lmerTest) # version 3.1.3
+library(sjPlot) # version 2.8.15
+library(performance) # version 0.12.4
+library(tibble) # version 3.2.1
+library(corrplot) # version 0.92
+library(moments) # version 0.14.1
+library(nortest) # version 1.0.4
+library(lmtest) # version 0.9.40
+library(parameters) # version 0.24.0
+library(purrr) # version 1.0.1
 ```
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = 'C:/Users/Ghislane/Desktop/optimal_difficulty_1/code/data/sides/elo_bins')
+knitr::opts_knit$set(root.dir = 'C:/Users/Ghislaine/Desktop/optimal_difficulty_1/code/data/sides/elo_bins')
 ```
 
 # read file
@@ -137,65 +148,8 @@ corrplot(correlation_matrix, method = "number")
 ```
 
 
-## within student correlation
-```{r}
-library(dplyr)
 
-# Calculate the correlation within each student across their specialties
-student_correlations <- average_quest_dif %>%
-  group_by(student) %>%
-  summarize(correlation = cor(mean_relative_difficulty, student_ability, use = "complete.obs"),
-            .groups = 'drop')
-
-# Viewing the summary of these correlations
-summary(student_correlations$correlation)
-
-# Plotting the distribution of within-student correlations
-p1 <- ggplot(student_correlations, aes(x = correlation)) +
-  geom_histogram(aes(y = ..density..), binwidth = 0.05, fill = "blue", alpha = 0.3, color = "black") +
-  geom_density(color = "blue", fill = "blue", alpha = 0.5) +
-  ggtitle("Density and Histogram of Within-Student Correlations") +
-  xlab("Correlation between Mean Relative Difficulty and Ability") +
-  ylab("Density") +
-  theme_minimal()
-
-print(p1)
-
-```
-
-
-## within specialty correlation
-
-```{r}
-library(dplyr)
-
-# Calculate the correlation within each student across their specialties
-specialty_correlations <- average_quest_dif %>%
-  group_by(specialty) %>%
-  summarize(correlation = cor(mean_relative_difficulty, student_ability, use = "complete.obs"),
-            .groups = 'drop')
-
-print(specialty_correlations)
-# Viewing the summary of these correlations
-summary(specialty_correlations$correlation)
-
-# Plotting the distribution of within-specialty correlations using a bar plot
-p1 <- ggplot(specialty_correlations, aes(x = specialty, y = correlation)) +
-  geom_bar(stat = "identity", fill = "blue", alpha = 0.3, color = "black") +
-  ggtitle("Bar Plot of Within-specialty Correlations") +
-  xlab("Specialty") +
-  ylab("Correlation between Mean Relative Difficulty and Ability") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for better readability
-
-print(p1)
-
-
-
-```
-
-
-### Full Model & Colinearity check : specialty as radnom intercept and slope
+## Full Model & Colinearity check : specialty as radnom intercept and slope
 ```{r}
 model_formula <- prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relative_difficulty + 
   n_question_in_spec_training_c+
@@ -230,6 +184,79 @@ cat("AIC =", aic_value, "\n")
 cat("BIC =", bic_value, "\n")
 
 ```
+### Assumption checks
+
+#### for DV
+```{r}
+# Histogram of the DV
+hist(average_quest_dif$prop_correct_ecn, 
+     main = "Histogram of the Dependent Variable", 
+     xlab = "Final Exam Score (Proportion Correct)", 
+     breaks = 30, col = "gray")
+
+# Q-Q plot of the DV
+qqnorm(average_quest_dif$prop_correct_ecn, main = "Q-Q Plot of the Dependent Variable")
+qqline(average_quest_dif$prop_correct_ecn, col = "red")
+
+# Skewness and Kurtosis
+skewness_value <- skewness(average_quest_dif$prop_correct_ecn)
+kurtosis_value <- kurtosis(average_quest_dif$prop_correct_ecn)
+print(paste("Skewness:", skewness_value))
+print(paste("Kurtosis:", kurtosis_value))
+
+
+# Box plot for the dependent variable
+boxplot(average_quest_dif$prop_correct_ecn,
+        main = "Box Plot of Dependent Variable",
+        ylab = "Final Exam Score (Proportion Correct)",
+        col = "lightblue")
+
+
+```
+
+#### for residuals
+```{r}
+# linearity
+# Plot observed vs fitted values
+fitted_values <- fitted(model_fit)
+plot(fitted_values, average_quest_dif$prop_correct_ecn,
+     main = "Observed vs Fitted Values",
+     xlab = "Fitted Values", ylab = "Observed Values")
+abline(a = 0, b = 1, col = "red")  # Add a diagonal line
+
+# Residuals vs Fitted Values
+residuals <- resid(model_fit)
+plot(fitted_values, residuals,
+     main = "Residuals vs Fitted Values",
+     xlab = "Fitted Values", ylab = "Residuals")
+abline(h = 0, col = "red")  # Add a horizontal line at 0
+
+residuals <- resid(model_fit)
+
+# Q-Q plot
+qqnorm(residuals)
+qqline(residuals, col = "red")
+
+# Histogram
+hist(residuals, breaks = 50, main = "Histogram of Residuals", xlab = "Residuals")
+
+skewness_value <- skewness(residuals)
+kurtosis_value <- kurtosis(residuals)
+
+print(paste("Skewness:", skewness_value))
+print(paste("Kurtosis:", kurtosis_value))
+
+plot(density(residuals), main = "Density Plot of Residuals", xlab = "Residuals")
+curve(dnorm(x, mean = mean(residuals), sd = sd(residuals)), add = TRUE, col = "red")
+legend("topright", legend = c("Empirical", "Normal"), col = c("black", "red"), lty = 1)
+
+# Box plot for residuals
+residuals <- resid(model_fit)  # Calculate residuals from the fitted model
+boxplot(residuals,
+        main = "Box Plot of Residuals",
+        ylab = "Residuals",
+        col = "lightgreen")
+```
 
 
 ### p value for random effect
@@ -263,20 +290,6 @@ print(anova_result)
 ```
 
 
-## correlation fixed effects
-```{r}
-# Convert fixed effects coefficients to a matrix-like object
-fixed_effects_matrix <- matrix(fixed_effects, nrow = 1)
-
-# Calculate correlation matrix for fixed effects
-cor_fixed_effects <- cor(t(fixed_effects_matrix))
-
-# Display the correlation matrix
-cat("Correlation matrix of fixed effects:\n")
-print(cor_fixed_effects)
-
-```
-
 
 ##have table with exact numbers
 
@@ -293,7 +306,6 @@ fixed_effects[,"Pr(>|t|)"] <- ifelse(fixed_effects[,"Pr(>|t|)"] < .Machine$doubl
 print(fixed_effects)
 
 ```
-
 
 # Model Fit
 ```{r}
@@ -521,68 +533,6 @@ ggsave(
 print(p)
 ```
 
-# calculate the mean optimal relative difficulty across all specialties and students
-
-```{r}
-# Extract random effects
-random_effects <- ranef(model_fit)
-
-# Get the random effects for each specialty
-specialty_effects <- random_effects$specialty
-
-# Assuming a plausible range for mean_relative_difficulty
-difficulty_range <- seq(-3, 3, length.out = 100)
-
-
-library(dplyr)
-library(purrr)
-
-# Assume mean values for student_ability and n_question_in_spec_training_c
-mean_student_ability <- mean(average_quest_dif$student_ability)
-mean_n_questions <- mean(average_quest_dif$n_question_in_spec_training_c)
-
-# Function to calculate predictions
-calculate_predictions <- function(specialty) {
-  # Extract specialty-specific random effects
-  intercept_spec <- specialty_effects[[specialty]]$`(Intercept)`
-  slope_difficulty <- specialty_effects[[specialty]]$mean_relative_difficulty
-  slope_difficulty_sq <- specialty_effects[[specialty]]$`I(mean_relative_difficulty^2)`
-  
-  # Calculate predictions across the difficulty range
-  sapply(difficulty_range, function(diff) {
-    pred <- (fixed_effects$`(Intercept)`
-             + fixed_effects$mean_relative_difficulty * diff
-             + fixed_effects$`I(mean_relative_difficulty^2)` * diff^2
-             + fixed_effects$student_ability * mean_student_ability
-             + fixed_effects$`student_ability:mean_relative_difficulty` * mean_student_ability * diff
-             + fixed_effects$`student_ability:I(mean_relative_difficulty^2)` * mean_student_ability * diff^2
-             + fixed_effects$n_question_in_spec_training_c * mean_n_questions
-             + fixed_effects$`student_ability:n_question_in_spec_training_c` * mean_student_ability * mean_n_questions
-             + intercept_spec
-             + slope_difficulty * diff
-             + slope_difficulty_sq * diff^2)
-    return(pred)
-  })
-}
-
-# Extract fixed effects
-fixed_effects <- fixef(model_fit)
-
-fixed_effects <- as.list(fixef(model_fit))
-
-# Calculate predictions for each specialty and find the maximum
-optimal_difficulties <- lapply(rownames(specialty_effects), function(specialty) {
-  predictions <- calculate_predictions(specialty)
-  max_index <- which.max(predictions)
-  max_difficulty <- difficulty_range[max_index]
-  list(specialty = specialty, max_difficulty = max_difficulty, max_prediction = max(predictions))
-})
-
-optimal_difficulties <- bind_rows(optimal_difficulties)
-
-print(optimal_difficulties)
-
-```
 
 ```{r}
 library(lme4)
