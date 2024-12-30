@@ -2,11 +2,15 @@
 title: "optimal_difficulty_lmer_analysis"
 author: "Erva"
 date: "2024-04-26"
-output: html_document
-RStudio version: RStudio 2023.12.0+369 "Ocean Storm" Release (33206f75bd14d07d84753f965eaa24756eda97b7, 2023-12-17) for windows
-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) RStudio/2023.12.0+369 Chrome/116.0.5845.190 Electron/26.2.4 Safari/537.36
-R version: 4.2.2 (2022-10-31 ucrt)
+output: 
+  html_document: default
+editor_options: 
+  chunk_output_type: console
+RStudio_version: "2023.12.0+369 Ocean Storm Release (33206f75bd14d07d84753f965eaa24756eda97b7, 2023-12-17)"
+platform: "Windows 10 x64 (build 19045)"
+R_version: "4.2.2 (2022-10-31 ucrt)"
 ---
+
 
 Packages
 
