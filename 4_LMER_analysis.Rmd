@@ -42,6 +42,8 @@ library(purrr) # version 1.0.1
 
 ```{r setup, include=FALSE}
 knitr::opts_knit$set(root.dir = 'C:/Users/Ghislaine/Desktop/optimal_difficulty_1/code/data/sides/elo_bins')
+
+setwd('C:/Users/Ghislaine/Desktop/optimal_difficulty_1/code/data/sides/elo_bins')
 ```
 
 # read file
@@ -274,7 +276,7 @@ full_model <- lmer(prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relat
   student_ability:n_question_in_spec_training_c +
   (1 | student) +
   (1 + mean_relative_difficulty + I(mean_relative_difficulty^2) | specialty), 
-  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"))
+  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"), REML = FALSE)
 
 
 reduced_model <- lmer(prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_relative_difficulty + 
@@ -285,7 +287,7 @@ reduced_model <- lmer(prop_correct_ecn ~ I(mean_relative_difficulty^2) + mean_re
   student_ability:n_question_in_spec_training_c +
   (1 | student) +
   (1 + I(mean_relative_difficulty^2) | specialty), 
-  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"))
+  data = average_quest_dif, control = lmerControl(optimizer = "bobyqa"), REML = FALSE)
 
 library(lmtest)
 anova_result <- anova(reduced_model, full_model)
